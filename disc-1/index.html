@@ -46,22 +46,24 @@
       white-space: nowrap; font: 300 12px/1 'Avenir Next', Avenir, 'Helvetica Neue', system-ui, sans-serif; letter-spacing: .02em; color: #d6d6d6; background: rgba(38,38,38,.92);
       border-radius: 5px; padding: 6px 10px; pointer-events: none; opacity: 0; transition: opacity .2s; }
     .btn[data-tip]:hover::after { opacity: 1; transition-delay: .25s; }
-    #vol.open ~ #bSound::after { display: none; }   /* the slider takes that spot while it is open */
+    #vol.open ~ #bSound::after, #seek.open ~ #bPlay::after { display: none; }   /* the slider takes that spot while it is open */
   }
-  .btn:focus-visible, #volPill:focus-visible { outline: 2px solid var(--line-hi); outline-offset: 2px; }
+  .btn:focus-visible, #volPill:focus-visible, #seekPill:focus-visible { outline: 2px solid var(--line-hi); outline-offset: 2px; }
   .btn.on { border-color: var(--line-hi); color: var(--fg-hi); }
 
   #bar { transition: opacity .5s ease; }
   body.idle #bar { opacity: 0; pointer-events: none; }
   body.idle canvas { cursor: none; }
-  #soundWrap { position: relative; }
-  #vol { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); padding-bottom: 10px; display: none; }
-  #vol.open { display: block; }
-  #volPill { position: relative; width: 44px; height: 116px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 22px;
+  #soundWrap, #playWrap { position: relative; }
+  #vol, #seek { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); padding-bottom: 10px; display: none; }
+  #vol.open, #seek.open { display: block; }
+  #volPill, #seekPill { position: relative; width: 44px; height: 116px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 22px;
     background: rgba(0, 0, 0, .85); touch-action: none; cursor: pointer; }
-  #volTrack { position: absolute; left: 50%; top: 16px; bottom: 16px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--track); }
-  #volFill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; border-radius: 2px; background: var(--line-hi); }
-  #volThumb { position: absolute; left: 50%; bottom: 0; width: 14px; height: 14px; margin-left: -7px; margin-bottom: -7px; border-radius: 50%; background: var(--fg-hi); }
+  #volTrack, #seekTrack { position: absolute; left: 50%; top: 16px; bottom: 16px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--track); }
+  #volFill, #seekFill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; border-radius: 2px; background: var(--line-hi); }
+  #volThumb, #seekThumb { position: absolute; left: 50%; bottom: 0; width: 14px; height: 14px; margin-left: -7px; margin-bottom: -7px; border-radius: 50%; background: var(--fg-hi); }
+
+  #seekPill { height: 150px; border-radius: 22px; }
 
   #loading, #start { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
@@ -90,7 +92,14 @@
     </div>
     <button class="btn" id="bSound" type="button" aria-label="Sound" data-tip="Sound"></button>
   </div>
-  <button class="btn" id="bPlay" type="button" aria-label="Pause" data-tip="Pause"></button>
+  <div id="playWrap">
+    <div id="seek">
+      <div id="seekPill" role="slider" tabindex="0" aria-label="Position in video" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="seekTrack"><div id="seekFill"></div><div id="seekThumb"></div></div>
+      </div>
+    </div>
+    <button class="btn" id="bPlay" type="button" aria-label="Pause" data-tip="Pause"></button>
+  </div>
   <button class="btn" id="bFull" type="button" aria-label="Fullscreen" data-tip="Fullscreen"></button>
 </div>
 
@@ -336,6 +345,52 @@ $('soundWrap').addEventListener('mousemove', showVol);
 $('soundWrap').addEventListener('mouseleave', () => closeVol(400));
 paintVol();
 
+// position in the video: same kind of slider as the volume, pops up above the play button. Up = later in the film.
+let seekDragging = false, seekTimer = null, lastSeekT = 0;
+const seekEl = $('seek'), seekPill = $('seekPill'), seekTrack = $('seekTrack');
+const duration = () => (isFinite(vidA.duration) && vidA.duration > 0) ? vidA.duration : 0;
+function paintSeek(f) {
+  const pct = Math.round(Math.max(0, Math.min(1, f)) * 100);
+  $('seekFill').style.height = pct + '%';
+  $('seekThumb').style.bottom = pct + '%';
+  seekPill.setAttribute('aria-valuenow', pct);
+}
+function seekTo(f) {
+  const d = duration(); if (!d) return;
+  const t = Math.max(0, Math.min(1, f)) * d;
+  vidA.currentTime = t; vidB.currentTime = t;
+}
+function seekFromEvent(e, final) {
+  const r = seekTrack.getBoundingClientRect();
+  const f = Math.max(0, Math.min(1, 1 - (e.clientY - r.top) / r.height));
+  paintSeek(f);
+  const now = performance.now();
+  if (final || now - lastSeekT > 150) { lastSeekT = now; seekTo(f); }
+}
+function openSeek() { clearTimeout(seekTimer); seekEl.classList.add('open'); }
+function closeSeek(delay) {
+  clearTimeout(seekTimer);
+  if (seekDragging) return;
+  seekTimer = setTimeout(() => seekEl.classList.remove('open'), delay || 0);
+}
+function showSeek() { openSeek(); closeSeek(2000); }
+seekPill.addEventListener('pointerdown', e => { seekDragging = true; seekPill.setPointerCapture(e.pointerId); openSeek(); seekFromEvent(e, true); });
+seekPill.addEventListener('pointermove', e => { if (seekDragging) seekFromEvent(e, false); });
+function endSeekDrag(e) { if (seekDragging && e && e.type === 'pointerup') seekFromEvent(e, true); seekDragging = false; closeSeek(2500); }
+seekPill.addEventListener('pointerup', endSeekDrag);
+seekPill.addEventListener('pointercancel', endSeekDrag);
+seekPill.addEventListener('keydown', e => {
+  const d = duration(); if (!d) return;
+  showSeek();
+  if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); seekTo(vidA.currentTime / d + 10 / d); paintSeek(vidA.currentTime / d); }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); seekTo(vidA.currentTime / d - 10 / d); paintSeek(vidA.currentTime / d); }
+});
+$('playWrap').addEventListener('mouseenter', showSeek);
+$('playWrap').addEventListener('mousemove', showSeek);
+$('playWrap').addEventListener('mouseleave', () => closeSeek(400));
+$('bPlay').addEventListener('click', showSeek);
+setInterval(() => { const d = duration(); if (d && !seekDragging) paintSeek(vidA.currentTime / d); }, 250);
+
 $('bFull').onclick = () => {
   const el = document.documentElement;
   try {
@@ -363,13 +418,13 @@ function showControls(e) {
   idleTimer = setTimeout(hideControls, 3000);
 }
 function hideNow() {
-  clearTimeout(idleTimer); closeVol(0);
+  clearTimeout(idleTimer); closeVol(0); closeSeek(0);
   document.body.classList.add('idle');
 }
 function hideControls() {
   if (!playing) return;                                   // stay visible while paused
-  if (dragging || volDragging) { idleTimer = setTimeout(hideControls, 1500); return; }
-  closeVol(0);
+  if (dragging || volDragging || seekDragging) { idleTimer = setTimeout(hideControls, 1500); return; }
+  closeVol(0); closeSeek(0);
   document.body.classList.add('idle');
 }
 ['pointermove', 'pointerdown', 'keydown', 'touchstart'].forEach(t => window.addEventListener(t, showControls, { passive: true }));
