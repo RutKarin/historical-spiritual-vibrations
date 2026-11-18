@@ -64,6 +64,9 @@
   #volThumb, #seekThumb { position: absolute; left: 50%; bottom: 0; width: 14px; height: 14px; margin-left: -7px; margin-bottom: -7px; border-radius: 50%; background: var(--fg-hi); }
 
   #seekPill { height: 150px; border-radius: 22px; }
+  #seekTime { position: absolute; left: 22px; top: 50%; transform: translateY(-50%); white-space: nowrap; pointer-events: none;
+    font: 300 11px/1 'Avenir Next', Avenir, 'Helvetica Neue', system-ui, sans-serif; letter-spacing: .03em; font-variant-numeric: tabular-nums;
+    color: #9a9a9a; text-shadow: 0 0 4px #000, 0 0 2px #000; }
 
   #loading, #start { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
@@ -95,7 +98,7 @@
   <div id="playWrap">
     <div id="seek">
       <div id="seekPill" role="slider" tabindex="0" aria-label="Position in video" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-        <div id="seekTrack"><div id="seekFill"></div><div id="seekThumb"></div></div>
+        <div id="seekTrack"><div id="seekFill"></div><div id="seekThumb"><span id="seekTime"></span></div></div>
       </div>
     </div>
     <button class="btn" id="bPlay" type="button" aria-label="Pause" data-tip="Pause"></button>
@@ -354,7 +357,10 @@ function paintSeek(f) {
   $('seekFill').style.height = pct + '%';
   $('seekThumb').style.bottom = pct + '%';
   seekPill.setAttribute('aria-valuenow', pct);
+  const d = duration();
+  if (d) $('seekTime').textContent = fmt(pct / 100 * d) + ' / ' + fmt(d);
 }
+function fmt(t) { t = Math.max(0, Math.round(t)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }
 function seekTo(f) {
   const d = duration(); if (!d) return;
   const t = Math.max(0, Math.min(1, f)) * d;
