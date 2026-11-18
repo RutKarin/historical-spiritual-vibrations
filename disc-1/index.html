@@ -408,6 +408,7 @@ $('bFull').onclick = () => {
 document.addEventListener('fullscreenchange', () => {
   const on = !!document.fullscreenElement;
   $('bFull').innerHTML = on ? ICON.exit : ICON.full;
+  $('bFull').classList.toggle('on', !!on);
   $('bFull').setAttribute('aria-label', on ? 'Exit fullscreen' : 'Fullscreen');
   $('bFull').dataset.tip = on ? 'Exit fullscreen' : 'Fullscreen';
 });
