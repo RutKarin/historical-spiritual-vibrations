@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>[hidden]{display:none!important}</style>
+<title>Video Disc</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Layout: one black stage, one two-sided disc centred, icon controls pinned to the bottom edge.
+     Single dark look on purpose: the work is shown on black. */
+  :root {
+    --bg: #000000;
+    --fg: #bdbdbd;
+    --fg-hi: #ffffff;
+    --line: #3a3a3a;
+    --line-hi: #cfcfcf;
+    --btn: rgba(0, 0, 0, 0.55);
+    --track: #2a2a2a;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden;
+    background: var(--bg); color: var(--fg);
+    font-family: system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    padding-block: 0;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  canvas.drag { cursor: grabbing; }
+
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; align-items: flex-end; gap: 12px;
+    padding-top: 12px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .btn { width: 44px; height: 44px; padding: 0; display: grid; place-items: center; border-radius: 50%;
+    background: var(--btn); color: var(--fg); border: 1px solid var(--line); cursor: pointer; font-family: inherit; }
+  .btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  .btn:hover { border-color: #777; color: var(--fg-hi); }
+  /* our own hover labels (the browser's built-in ones are slow and unreliable) */
+  .btn { position: relative; }
+  @media (hover: hover) {
+    .btn[data-tip]::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+      white-space: nowrap; font: 300 12px/1 'Avenir Next', Avenir, 'Helvetica Neue', system-ui, sans-serif; letter-spacing: .02em; color: #d6d6d6; background: rgba(38,38,38,.92);
+      border-radius: 5px; padding: 6px 10px; pointer-events: none; opacity: 0; transition: opacity .2s; }
+    .btn[data-tip]:hover::after { opacity: 1; transition-delay: .25s; }
+    #vol.open ~ #bSound::after { display: none; }   /* the slider takes that spot while it is open */
+  }
+  .btn:focus-visible, #volPill:focus-visible { outline: 2px solid var(--line-hi); outline-offset: 2px; }
+  .btn.on { border-color: var(--line-hi); color: var(--fg-hi); }
+
+  #bar { transition: opacity .5s ease; }
+  body.idle #bar { opacity: 0; pointer-events: none; }
+  body.idle canvas { cursor: none; }
+  #soundWrap { position: relative; }
+  #vol { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); padding-bottom: 10px; display: none; }
+  #vol.open { display: block; }
+  #volPill { position: relative; width: 44px; height: 116px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 22px;
+    background: rgba(0, 0, 0, .85); touch-action: none; cursor: pointer; }
+  #volTrack { position: absolute; left: 50%; top: 16px; bottom: 16px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--track); }
+  #volFill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; border-radius: 2px; background: var(--line-hi); }
+  #volThumb { position: absolute; left: 50%; bottom: 0; width: 14px; height: 14px; margin-left: -7px; margin-bottom: -7px; border-radius: 50%; background: var(--fg-hi); }
+
+  #loading, #start { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+  #loading { pointer-events: none; opacity: .5; }
+  #start { background: rgba(0, 0, 0, .65); cursor: pointer; z-index: 5; }
+  #hint { position: fixed; left: 0; right: 0; text-align: center; pointer-events: none; z-index: 3;
+    font-size: 12px; line-height: 1; color: #d6d6d6; opacity: 0; transition: opacity .8s; }
+  #hint span { display: inline-block; font: 300 16px/1 'Avenir Next', Avenir, 'Helvetica Neue', system-ui, sans-serif; letter-spacing: .02em; background: rgba(38,38,38,.92); border-radius: 6px; padding: 9px 15px; }
+  #hint.show { opacity: 1; }
+  #err { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px;
+    text-align: center; font-size: 14px; line-height: 1.5; z-index: 9; background: var(--bg); }
+</style>
+
+<canvas id="c"></canvas>
+<div id="loading">Loading video…</div>
+<div id="start" hidden>Tap to start</div>
+<div id="hint"><span>Rotate the planet</span></div>
+<div id="err" hidden></div>
+<div id="bar">
+  <button class="btn" id="bSpin" type="button" aria-label="Auto rotate" data-tip="Auto rotate"></button>
+  <div id="soundWrap">
+    <div id="vol">
+      <div id="volPill" role="slider" tabindex="0" aria-label="Volume" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="volTrack"><div id="volFill"></div><div id="volThumb"></div></div>
+      </div>
+    </div>
+    <button class="btn" id="bSound" type="button" aria-label="Sound" data-tip="Sound"></button>
+  </div>
+  <button class="btn" id="bPlay" type="button" aria-label="Pause" data-tip="Pause"></button>
+  <button class="btn" id="bFull" type="button" aria-label="Fullscreen" data-tip="Fullscreen"></button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const CONFIG = {
+  sideA: 'greenhouse.mp4',
+  sideB: 'ir.mp4',
+  keepInSync: true,
+  autoSpinSpeed: 0.035,  // radians per second (one full turn in about 180 s)
+  startVolume: 0.5,      // where the volume slider starts (0-1); sound begins at the visitor's first click or tap, as browsers require
+  soundBleed: 0.16,      // how much of the far side's sound leaks through (0 = only the side you face, 1 = both equally loud)
+  edgeGrain: 0.5,        // roughness of the edge, like painted-over wood: 0 = smooth, 1 = very coarse
+  edgeLight: 0.4         // brightness of the coin edge where it catches the light (the sides); it fades to black at the top and bottom
+};
+
+const SPK = '<path d="M4 9.5v5h4l5 4v-13l-5 4z"/>';
+const ICON = {
+  spin:    '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.7-6"/><path d="M20 4v5h-5"/></svg>',
+  play:    '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/></svg>',
+  pause:   '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/></svg>',
+  full:    '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+  exit:    '<svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>',
+  mute:    '<svg viewBox="0 0 24 24">' + SPK + '<path d="M16.5 9.5l5 5M21.5 9.5l-5 5"/></svg>',
+  low:     '<svg viewBox="0 0 24 24">' + SPK + '<path d="M16.5 9.5a4 4 0 0 1 0 5"/></svg>',
+  high:    '<svg viewBox="0 0 24 24">' + SPK + '<path d="M16.5 9.5a4 4 0 0 1 0 5M19 7a8 8 0 0 1 0 10"/></svg>'
+};
+
+const $ = id => document.getElementById(id);
+function fail(msg) { const e = $('err'); e.textContent = msg; e.hidden = false; }
+window.addEventListener('error', ev => fail('Error: ' + ev.message));
+
+$('bSpin').innerHTML = ICON.spin;
+$('bPlay').innerHTML = ICON.pause;
+$('bFull').innerHTML = ICON.full;
+$('bSound').innerHTML = ICON.mute;
+
+if (typeof THREE === 'undefined') { fail('Could not load three.js.'); }
+else {
+
+const canvas = $('c');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { fail('Your browser could not start 3D mode (WebGL).'); throw e; }
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(0x000000, 1);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
+
+let barReserve = 140;
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  // room at the bottom: the 60 px controls plus about 4 cm (150 px) of air above them; less on short or narrow screens
+  const bar = w < 600 ? 180 : Math.min(210, h * 0.28);
+  barReserve = bar;
+  const top = 40;                    // room at the top
+  const avail = Math.min(h - bar - top, w * 0.86);
+  camera.position.set(0, 0, h / (tan * avail));
+  camera.setViewOffset(w, h, 0, (bar - top) / 2, w, h);
+  camera.lookAt(0, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+function makeVideo(src) {
+  const v = document.createElement('video');
+  v.src = src; v.loop = true; v.muted = true; v.playsInline = true; v.preload = 'auto';
+  v.crossOrigin = 'anonymous';
+  v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
+  v.hidden = true;
+  document.body.appendChild(v);
+  return v;
+}
+const vidA = makeVideo(CONFIG.sideA);
+const vidB = makeVideo(CONFIG.sideB);
+
+function makeTex(v) {
+  const t = new THREE.VideoTexture(v);
+  t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = false; t.encoding = THREE.sRGBEncoding;
+  return t;
+}
+const texA = makeTex(vidA), texB = makeTex(vidB);
+
+const R = 1, T = 0.06, EPS = 0.0008;
+function face(tex) {
+  return new THREE.Mesh(new THREE.CircleGeometry(R, 128),
+    new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+}
+const front = face(texA); front.position.z = T / 2 + EPS;
+const back = face(texB); back.rotation.y = Math.PI; back.position.z = -(T / 2 + EPS);
+
+// The coin edge: dark at the top and bottom of the disc, catching light at the sides.
+// The texture runs around the circumference: 0 and 0.5 are the bottom and top, 0.25 and 0.75 the sides.
+function rimTexture(light, grain) {
+  const W = 1024, H = 64;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d');
+  const img = x.createImageData(W, H);
+  const hash = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
+  for (let i = 0; i < W; i++) {
+    const v = Math.abs(Math.cos(2 * Math.PI * (i + 0.5) / W));   // 1 at the top and bottom, 0 at the sides
+    const base = 0.015 + (light - 0.015) * Math.pow(1 - v, 1.4);
+    for (let j = 0; j < H; j++) {
+      // fine grain plus faint streaks that run along the edge, like painted-over wood
+      const fine = hash(i, j) - 0.5;
+      const streak = hash(Math.floor(i / 40), j) - 0.5;
+      const n = fine * 0.7 + streak * 0.3;
+      const g = Math.max(0, Math.min(1, base * (1 + grain * n * 2) + grain * 0.03 * n));
+      const k = (j * W + i) * 4, b = Math.round(255 * g);
+      img.data[k] = img.data[k + 1] = img.data[k + 2] = b; img.data[k + 3] = 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding;
+  t.anisotropy = 4;
+  return t;
+}
+const rim = new THREE.Mesh(new THREE.CylinderGeometry(R, R, T, 128, 1, true),
+  new THREE.MeshBasicMaterial({ map: rimTexture(CONFIG.edgeLight, CONFIG.edgeGrain), toneMapped: false }));
+rim.rotation.x = Math.PI / 2;
+
+const disc = new THREE.Group();
+disc.rotation.order = 'YXZ';
+disc.add(front, back, rim);
+scene.add(disc);
+
+// ---------------- motion ----------------
+let yaw = 0, vel = 0, autoSpin = true, dragging = false;
+let lastX = 0, lastY = 0, lastMoveT = 0, downX = 0, downY = 0, dragMoved = false, dragEndT = 0;
+
+function setSpin(on) { autoSpin = on; $('bSpin').classList.toggle('on', on); }
+setSpin(true);   // the disc turns by itself until the visitor touches it
+
+canvas.addEventListener('pointerdown', e => {
+  dragging = true; canvas.setPointerCapture(e.pointerId); canvas.classList.add('drag');
+  lastX = e.clientX; lastY = e.clientY; lastMoveT = performance.now(); vel = 0; setSpin(false);
+  downX = e.clientX; downY = e.clientY; dragMoved = false;
+  closeVol();
+});
+canvas.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  if (!dragMoved && Math.hypot(e.clientX - downX, e.clientY - downY) > 4) { dragMoved = true; hideNow(); }   // controls vanish as soon as the disc is dragged
+  const now = performance.now(), dt = Math.max((now - lastMoveT) / 1000, 0.001);
+  const dyaw = (e.clientX - lastX) * 0.008;
+  yaw += dyaw;
+  vel = 0.7 * vel + 0.3 * (dyaw / dt);
+  lastX = e.clientX; lastY = e.clientY; lastMoveT = now;
+});
+// One-time hint: the first time a mouse pointer moves over the disc. It never shows again in this visit.
+let hintDone = false;
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+canvas.addEventListener('pointermove', e => {
+  if (hintDone || dragging || e.pointerType !== 'mouse') return;
+  const r = canvas.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  if (!ray.intersectObject(disc, true).length) return;
+  hintDone = true;
+  const h = $('hint');
+  h.style.top = Math.max(0, window.innerHeight - barReserve + 8) + 'px';
+  h.classList.add('show');
+  setTimeout(() => h.classList.remove('show'), 3500);
+});
+canvas.addEventListener('pointerdown', () => { hintDone = true; $('hint').classList.remove('show'); });
+function endDrag() { dragging = false; canvas.classList.remove('drag'); if (dragMoved) dragEndT = performance.now(); if (performance.now() - lastMoveT > 80) vel = 0; }
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+window.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft' && document.activeElement !== $('volPill')) { yaw -= 0.15; setSpin(false); }
+  if (e.key === 'ArrowRight' && document.activeElement !== $('volPill')) { yaw += 0.15; setSpin(false); }
+  if (e.key === ' ' && document.activeElement.tagName !== 'BUTTON') { e.preventDefault(); $('bPlay').click(); }
+});
+
+// ---------------- controls ----------------
+$('bSpin').onclick = () => setSpin(!autoSpin);
+
+let playing = true;
+function playAll() { return Promise.all([vidA.play(), vidB.play()]); }
+$('bPlay').onclick = () => {
+  if (playing) {
+    vidA.pause(); vidB.pause(); playing = false;
+    $('bPlay').innerHTML = ICON.play; $('bPlay').setAttribute('aria-label', 'Play'); $('bPlay').dataset.tip = 'Play';
+  } else {
+    playAll().catch(() => {}); playing = true;
+    $('bPlay').innerHTML = ICON.pause; $('bPlay').setAttribute('aria-label', 'Pause'); $('bPlay').dataset.tip = 'Pause';
+  }
+};
+
+// volume: 0 = silent. The sound follows whichever side faces the visitor.
+let vol = CONFIG.startVolume, lastVol = CONFIG.startVolume, audioOn = false, closeTimer = null, volDragging = false;
+const volEl = $('vol'), pill = $('volPill'), track = $('volTrack');
+
+function paintVol() {
+  const pct = Math.round(vol * 100);
+  $('volFill').style.height = pct + '%';
+  $('volThumb').style.bottom = pct + '%';
+  pill.setAttribute('aria-valuenow', pct);
+  $('bSound').innerHTML = vol <= 0.001 ? ICON.mute : (vol < 0.5 ? ICON.low : ICON.high);
+  $('bSound').classList.toggle('on', vol > 0.001);
+}
+function setVol(v) {
+  vol = Math.max(0, Math.min(1, v));
+  if (vol > 0.001) lastVol = vol;
+  paintVol();
+}
+function openVol() { clearTimeout(closeTimer); volEl.classList.add('open'); }
+function closeVol(delay) {
+  clearTimeout(closeTimer);
+  if (volDragging) return;
+  closeTimer = setTimeout(() => volEl.classList.remove('open'), delay || 0);
+}
+function volFromEvent(e) {
+  const r = track.getBoundingClientRect();
+  setVol(1 - (e.clientY - r.top) / r.height);
+}
+pill.addEventListener('pointerdown', e => {
+  volDragging = true; pill.setPointerCapture(e.pointerId); openVol(); volFromEvent(e);
+});
+pill.addEventListener('pointermove', e => { if (volDragging) volFromEvent(e); });
+function endVolDrag() { volDragging = false; closeVol(2500); }
+pill.addEventListener('pointerup', endVolDrag);
+pill.addEventListener('pointercancel', endVolDrag);
+pill.addEventListener('keydown', e => {
+  showVol();
+  if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); setVol(vol + 0.05); }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); setVol(vol - 0.05); }
+});
+function showVol() { openVol(); closeVol(2000); }   // the slider folds away 2 s after the last touch
+$('bSound').onclick = () => {
+  setVol(vol > 0.001 ? 0 : lastVol);
+  showVol();
+};
+$('soundWrap').addEventListener('mouseenter', showVol);
+$('soundWrap').addEventListener('mousemove', showVol);
+$('soundWrap').addEventListener('mouseleave', () => closeVol(400));
+paintVol();
+
+$('bFull').onclick = () => {
+  const el = document.documentElement;
+  try {
+    if (document.fullscreenElement) { document.exitFullscreen(); }
+    else if (el.requestFullscreen) { const p = el.requestFullscreen(); if (p && p.catch) p.catch(() => {}); }
+  } catch (e) {}
+};
+document.addEventListener('fullscreenchange', () => {
+  const on = !!document.fullscreenElement;
+  $('bFull').innerHTML = on ? ICON.exit : ICON.full;
+  $('bFull').setAttribute('aria-label', on ? 'Exit fullscreen' : 'Fullscreen');
+  $('bFull').dataset.tip = on ? 'Exit fullscreen' : 'Fullscreen';
+});
+if (!document.fullscreenEnabled) $('bFull').hidden = true;
+
+// ---------------- auto-hide controls, like a media player ----------------
+let idleTimer = null;
+function showControls(e) {
+  if (dragging && dragMoved) return;                                                   // stay hidden while the disc is being dragged
+  if (e && e.type === 'pointermove' && performance.now() - dragEndT < 700) return;     // and for a moment after letting go
+  // hovering over the disc does not reveal the controls; moving down towards them does
+  if (e && e.type === 'pointermove' && e.clientY < window.innerHeight - barReserve && !(e.target.closest && e.target.closest('#bar'))) return;
+  document.body.classList.remove('idle');
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(hideControls, 3000);
+}
+function hideNow() {
+  clearTimeout(idleTimer); closeVol(0);
+  document.body.classList.add('idle');
+}
+function hideControls() {
+  if (!playing) return;                                   // stay visible while paused
+  if (dragging || volDragging) { idleTimer = setTimeout(hideControls, 1500); return; }
+  closeVol(0);
+  document.body.classList.add('idle');
+}
+['pointermove', 'pointerdown', 'keydown', 'touchstart'].forEach(t => window.addEventListener(t, showControls, { passive: true }));
+showControls();
+
+// ---------------- start / loading ----------------
+// Try to start with sound. If the browser refuses (no click on the page yet), start muted and turn the sound on at the first click, tap or key.
+vidA.muted = false; vidB.muted = false;
+playAll().then(() => { audioOn = true; }).catch(() => {
+  vidA.muted = true; vidB.muted = true;
+  playAll().catch(() => { $('start').hidden = false; });
+});
+// Browsers only allow sound after the visitor has clicked, tapped or pressed a key once.
+function unlockAudio() {
+  if (audioOn) return;
+  audioOn = true;
+  vidA.muted = false; vidB.muted = false;
+  if (playing) playAll().catch(() => {});
+}
+['pointerdown', 'keydown', 'touchend'].forEach(t => window.addEventListener(t, unlockAudio, { passive: true }));
+$('start').onclick = () => { playAll().then(() => { $('start').hidden = true; }).catch(() => {}); };
+setInterval(() => {
+  const ready = vidA.readyState >= 3 && vidB.readyState >= 3;
+  $('loading').hidden = ready;
+  if (CONFIG.keepInSync && playing && ready && Math.abs(vidA.currentTime - vidB.currentTime) > 0.5) {
+    vidB.currentTime = vidA.currentTime;
+  }
+}, 2000);
+
+// ---------------- loop ----------------
+let prev = performance.now(), volA = 0, volB = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - prev) / 1000, 0.1); prev = now;
+
+  if (!dragging) {
+    if (autoSpin) yaw += CONFIG.autoSpinSpeed * dt;
+    else { yaw += vel * dt; vel *= Math.pow(0.06, dt); if (Math.abs(vel) < 0.001) vel = 0; }
+  }
+  disc.rotation.y = yaw;
+
+  // Both sides are audible, like in a room: the side you face is loudest, the other leaks through.
+  const w = (1 + Math.cos(yaw)) / 2, sm = w, bl = CONFIG.soundBleed, k = Math.min(1, dt * 4);   // sm: plain cosine blend, no hard switch at the edge-on position
+  volA += (vol * (bl + (1 - bl) * sm) - volA) * k;
+  volB += (vol * (bl + (1 - bl) * (1 - sm)) - volB) * k;
+  vidA.muted = !audioOn || volA < 0.01; vidB.muted = !audioOn || volB < 0.01;
+  if (!vidA.muted) vidA.volume = Math.min(1, volA);
+  if (!vidB.muted) vidB.volume = Math.min(1, volB);
+
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
+
+}
+</script>
+
+</html>
