@@ -115,6 +115,7 @@ const CONFIG = {
   autoSpinSpeed: 0.035,  // radians per second (one full turn in about 180 s)
   startVolume: 0.5,      // where the volume slider starts (0-1); sound begins at the visitor's first click or tap, as browsers require
   soundBleed: 0.16,      // how much of the far side's sound leaks through (0 = only the side you face, 1 = both equally loud)
+  revealZone: 110,       // height in px of the strip along the bottom where moving the mouse brings up the controls
   edgeGrain: 0.5,        // roughness of the edge, like painted-over wood: 0 = smooth, 1 = very coarse
   edgeLight: 0.4         // brightness of the coin edge where it catches the light (the sides); it fades to black at the top and bottom
 };
@@ -418,7 +419,7 @@ function showControls(e) {
   if (dragging && dragMoved) return;                                                   // stay hidden while the disc is being dragged
   if (e && e.type === 'pointermove' && performance.now() - dragEndT < 700) return;     // and for a moment after letting go
   // hovering over the disc does not reveal the controls; moving down towards them does
-  if (e && e.type === 'pointermove' && e.clientY < window.innerHeight - barReserve && !(e.target.closest && e.target.closest('#bar'))) return;
+  if (e && e.type === 'pointermove' && e.clientY < window.innerHeight - Math.min(CONFIG.revealZone, barReserve) && !(e.target.closest && e.target.closest('#bar'))) return;
   document.body.classList.remove('idle');
   clearTimeout(idleTimer);
   idleTimer = setTimeout(hideControls, 3000);
