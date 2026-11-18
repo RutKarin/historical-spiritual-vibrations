@@ -396,7 +396,7 @@ $('playWrap').addEventListener('mouseenter', showSeek);
 $('playWrap').addEventListener('mousemove', showSeek);
 $('playWrap').addEventListener('mouseleave', () => closeSeek(400));
 $('bPlay').addEventListener('click', showSeek);
-setInterval(() => { const d = duration(); if (d && !seekDragging) paintSeek(vidA.currentTime / d); }, 250);
+setInterval(() => { const d = duration(); if (d && !seekDragging) paintSeek(vidA.currentTime / d); $('bPlay').classList.toggle('on', playing); }, 250);
 
 $('bFull').onclick = () => {
   const el = document.documentElement;
